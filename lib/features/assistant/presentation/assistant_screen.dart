@@ -254,11 +254,11 @@ class _AssistantScreenState extends State<AssistantScreen> {
                                           : Colors.white38,
                                     ),
                                     const SizedBox(width: 10),
-                                    const Expanded(
+                                    Expanded(
                                       child: Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          Text(
+                                          const Text(
                                             'Whistle (Offline On-Device)',
                                             style: TextStyle(
                                               color: Colors.white,
@@ -266,18 +266,57 @@ class _AssistantScreenState extends State<AssistantScreen> {
                                               fontWeight: FontWeight.w500,
                                             ),
                                           ),
-                                          SizedBox(height: 2),
+                                          const SizedBox(height: 2),
                                           Text(
-                                            '16.9 MB local AI model • 100% private • No internet required',
+                                            ctrl.isVoiceModelDownloaded
+                                                ? '16.9 MB model installed • 100% private offline'
+                                                : 'Model not installed (30 MB download required)',
                                             style: TextStyle(
-                                              color: Colors.white38,
+                                              color: ctrl.isVoiceModelDownloaded
+                                                  ? Colors.white38
+                                                  : Colors.amberAccent,
                                               fontSize: 11,
                                             ),
                                           ),
+                                          if (ctrl.isDownloadingVoiceModel) ...[
+                                            const SizedBox(height: 6),
+                                            ClipRRect(
+                                              borderRadius: BorderRadius.circular(4),
+                                              child: LinearProgressIndicator(
+                                                value: ctrl.voiceModelDownloadProgress > 0
+                                                    ? ctrl.voiceModelDownloadProgress
+                                                    : null,
+                                                minHeight: 4,
+                                                backgroundColor: Colors.white12,
+                                                valueColor: const AlwaysStoppedAnimation(Colors.blueAccent),
+                                              ),
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              'Downloading... ${(ctrl.voiceModelDownloadProgress * 100).round()}%',
+                                              style: const TextStyle(color: Colors.blueAccent, fontSize: 10),
+                                            ),
+                                          ],
                                         ],
                                       ),
                                     ),
-                                    if (ctrl.isWhistleEngineActive)
+                                    const SizedBox(width: 8),
+                                    if (!ctrl.isVoiceModelDownloaded && !ctrl.isDownloadingVoiceModel)
+                                      ElevatedButton(
+                                        onPressed: ctrl.downloadVoiceModel,
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.blueAccent,
+                                          foregroundColor: Colors.white,
+                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                          minimumSize: Size.zero,
+                                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(6),
+                                          ),
+                                        ),
+                                        child: const Text('Download', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                      )
+                                    else if (ctrl.isWhistleEngineActive)
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                         decoration: BoxDecoration(

@@ -238,6 +238,57 @@ class AssistantController extends ChangeNotifier {
       _voiceService is AdaptiveVoiceCommandService &&
       _voiceService.activeEngine == VoiceEngineType.whistle;
 
+  /// True if the Whistle voice model is downloaded on device.
+  bool get isVoiceModelDownloaded {
+    final voice = _voiceService;
+    if (voice is AdaptiveVoiceCommandService) {
+      return voice.whistleService.isModelDownloaded;
+    }
+    return true;
+  }
+
+  /// True while the Whistle voice model is being downloaded.
+  bool get isDownloadingVoiceModel {
+    final voice = _voiceService;
+    if (voice is AdaptiveVoiceCommandService) {
+      return voice.whistleService.isDownloadingModel;
+    }
+    return false;
+  }
+
+  /// Download progress for the Whistle voice model (0.0..1.0).
+  double get voiceModelDownloadProgress {
+    final voice = _voiceService;
+    if (voice is AdaptiveVoiceCommandService) {
+      return voice.whistleService.modelDownloadProgress;
+    }
+    return 0.0;
+  }
+
+  /// Initiates download of the Whistle local voice model.
+  Future<void> downloadVoiceModel() async {
+    final voice = _voiceService;
+    if (voice is AdaptiveVoiceCommandService) {
+      notifyListeners();
+      await voice.whistleService.downloadModel(
+        onProgress: (progress, status) {
+          notifyListeners();
+        },
+      );
+      _isSpeechAvailable = voice.isAvailable;
+      notifyListeners();
+    }
+  }
+
+  /// Checks if the Whistle model is available on-disk.
+  Future<void> checkVoiceModelStatus() async {
+    final voice = _voiceService;
+    if (voice is AdaptiveVoiceCommandService) {
+      await voice.whistleService.checkModelDownloaded();
+      notifyListeners();
+    }
+  }
+
   /// Sets the active speech engine (Whistle on-device STT vs system SpeechRecognizer).
   Future<void> setVoiceEngine(VoiceEngineType engine) async {
     final voice = _voiceService;
@@ -614,6 +665,7 @@ class AssistantController extends ChangeNotifier {
     }
 
     _isSpeechAvailable = true;
+    await checkVoiceModelStatus();
     if (_modelStatus == ModelStatus.ready) {
       _statusMessage = 'Ready';
     }

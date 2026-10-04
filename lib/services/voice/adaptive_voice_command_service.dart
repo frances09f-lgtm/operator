@@ -11,7 +11,9 @@ enum VoiceEngineType {
 
 /// Adaptive [VoiceCommandService] that prefers the 100% on-device [WhistleVoiceCommandService],
 /// but gracefully falls back to [SpeechToTextVoiceCommandService] if local inference
-/// is unavailable or unsupported on the current platform/device.
+/// is unavailable, unsupported, or if the model is still being downloaded.
+///
+/// Ensures the microphone input NEVER fails or becomes disabled for the user.
 class AdaptiveVoiceCommandService implements VoiceCommandService {
   final WhistleVoiceCommandService _whistleService;
   final SpeechToTextVoiceCommandService _systemService;
@@ -35,6 +37,8 @@ class AdaptiveVoiceCommandService implements VoiceCommandService {
 
   VoiceEngineType get activeEngine => _activeEngine;
   bool get preferWhistle => _preferWhistle;
+  WhistleVoiceCommandService get whistleService => _whistleService;
+  SpeechToTextVoiceCommandService get systemService => _systemService;
 
   VoiceCommandService get _currentService =>
       _activeEngine == VoiceEngineType.whistle ? _whistleService : _systemService;
@@ -50,16 +54,31 @@ class AdaptiveVoiceCommandService implements VoiceCommandService {
   }
 
   @override
-  bool get isAvailable => _currentService.isAvailable;
+  bool get isAvailable {
+    if (_activeEngine == VoiceEngineType.whistle) {
+      if (_whistleService.isAvailable) return true;
+      // If Whistle is selected but local model is not downloaded or ready yet,
+      // allow fallback to system speech so the microphone button remains functional!
+      return _systemService.isAvailable;
+    }
+    return _systemService.isAvailable;
+  }
 
   @override
-  bool get isListening => _currentService.isListening;
+  bool get isListening => _whistleService.isListening || _systemService.isListening;
 
   @override
-  double get soundLevel => _currentService.soundLevel;
+  double get soundLevel => _whistleService.isListening
+      ? _whistleService.soundLevel
+      : _systemService.soundLevel;
 
   @override
-  String? get errorMessage => _currentService.errorMessage;
+  String? get errorMessage {
+    if (_activeEngine == VoiceEngineType.whistle && !_whistleService.isAvailable) {
+      return _whistleService.errorMessage ?? _systemService.errorMessage;
+    }
+    return _currentService.errorMessage;
+  }
 
   @override
   void Function(String partialText)? get onPartialResult => _onPartialResult;
@@ -87,37 +106,46 @@ class AdaptiveVoiceCommandService implements VoiceCommandService {
 
   @override
   Future<bool> initialize() async {
+    // Always initialize the system fallback service in background
+    await _systemService.initialize();
+
     if (_preferWhistle) {
-      debugPrint('[AdaptiveVoice] Attempting initialization with Whistle local STT engine...');
+      debugPrint('[AdaptiveVoice] Checking Whistle local STT engine...');
       final whistleOk = await _whistleService.initialize();
       if (whistleOk) {
         _activeEngine = VoiceEngineType.whistle;
         debugPrint('[AdaptiveVoice] Whistle local STT engine initialized successfully.');
         return true;
       }
-      debugPrint('[AdaptiveVoice] Whistle init failed/unsupported. Falling back to system STT.');
+      debugPrint('[AdaptiveVoice] Whistle model not ready yet. Ready with system STT fallback.');
+      _activeEngine = VoiceEngineType.whistle; // keep preference, fallback dynamically
+      return _systemService.isAvailable;
     }
 
     final systemOk = await _systemService.initialize();
     if (systemOk) {
       _activeEngine = VoiceEngineType.systemSpeech;
-      debugPrint('[AdaptiveVoice] System SpeechRecognizer initialized successfully.');
+      debugPrint('[AdaptiveVoice] System SpeechRecognizer initialized.');
       return true;
     }
 
     return false;
   }
 
-  /// Manually switch the voice engine (e.g. from user Settings).
+  /// Switch the active voice engine.
   Future<bool> setEngine(VoiceEngineType engine) async {
-    if (_currentService.isListening) {
-      await _currentService.stopListening();
+    if (isListening) {
+      await stopListening();
     }
 
     _activeEngine = engine;
     if (engine == VoiceEngineType.whistle) {
       _preferWhistle = true;
-      return await _whistleService.initialize();
+      final whistleOk = await _whistleService.initialize();
+      if (!whistleOk) {
+        await _systemService.initialize();
+      }
+      return isAvailable;
     } else {
       _preferWhistle = false;
       return await _systemService.initialize();
@@ -125,18 +153,33 @@ class AdaptiveVoiceCommandService implements VoiceCommandService {
   }
 
   @override
-  Future<bool> startListening({Duration? listenFor}) {
-    return _currentService.startListening(listenFor: listenFor);
+  Future<bool> startListening({Duration? listenFor}) async {
+    if (_activeEngine == VoiceEngineType.whistle) {
+      if (_whistleService.isAvailable) {
+        return await _whistleService.startListening(listenFor: listenFor);
+      }
+      debugPrint('[AdaptiveVoice] Whistle not ready (model pending download). Using system speech fallback.');
+      return await _systemService.startListening(listenFor: listenFor);
+    }
+    return await _systemService.startListening(listenFor: listenFor);
   }
 
   @override
   Future<String?> stopListening() {
-    return _currentService.stopListening();
+    if (_whistleService.isListening) {
+      return _whistleService.stopListening();
+    }
+    return _systemService.stopListening();
   }
 
   @override
-  Future<void> cancelListening() {
-    return _currentService.cancelListening();
+  Future<void> cancelListening() async {
+    if (_whistleService.isListening) {
+      await _whistleService.cancelListening();
+    }
+    if (_systemService.isListening) {
+      await _systemService.cancelListening();
+    }
   }
 
   @override

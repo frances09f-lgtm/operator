@@ -14,7 +14,7 @@ import 'package:friday_app/services/voice/voice_command_service.dart';
 /// - 16 kHz mono audio recording via [AudioRecorder].
 /// - Live amplitude / soundLevel tracking for voice-reactive UI orbs.
 /// - Adaptive silence detection (VAD heuristic) to auto-stop when speech ends.
-/// - Graceful fallback / safe failure handling if running on unsupported platforms.
+/// - Model download management and graceful fallback if model is not yet on-device.
 class WhistleVoiceCommandService implements VoiceCommandService {
   static const Duration _minListenDuration = Duration(milliseconds: 400);
   static const Duration _defaultListenDuration = Duration(seconds: 10);
@@ -30,6 +30,9 @@ class WhistleVoiceCommandService implements VoiceCommandService {
 
   bool _isAvailable = false;
   bool _isListening = false;
+  bool _isModelDownloaded = false;
+  bool _isDownloadingModel = false;
+  double _modelDownloadProgress = 0.0;
   double _soundLevel = 0.0;
   String? _errorMessage;
   String? _currentRecordingPath;
@@ -69,6 +72,57 @@ class WhistleVoiceCommandService implements VoiceCommandService {
   @override
   String? get errorMessage => _errorMessage;
 
+  bool get isModelDownloaded => _isModelDownloaded;
+  bool get isDownloadingModel => _isDownloadingModel;
+  double get modelDownloadProgress => _modelDownloadProgress;
+
+  /// Checks whether the model file/folder exists locally.
+  Future<bool> checkModelDownloaded() async {
+    try {
+      final appDocDir = await getApplicationDocumentsDirectory();
+      final modelFolder = Directory('${appDocDir.path}/models/$_modelName');
+      if (await modelFolder.exists()) {
+        final files = await modelFolder.list().toList();
+        _isModelDownloaded = files.isNotEmpty;
+        return _isModelDownloaded;
+      }
+    } catch (_) {}
+    _isModelDownloaded = false;
+    return false;
+  }
+
+  /// Downloads the voice model with progress reporting.
+  Future<bool> downloadModel({
+    void Function(double progress, String status)? onProgress,
+  }) async {
+    if (_isDownloadingModel) return false;
+    _isDownloadingModel = true;
+    _modelDownloadProgress = 0.0;
+    _errorMessage = null;
+
+    try {
+      debugPrint('[WhistleVoice] Starting download for model $_modelName...');
+      await _stt.downloadModel(
+        model: _modelName,
+        downloadProcessCallback: (progress, status, isError) {
+          final p = progress ?? 0.0;
+          _modelDownloadProgress = p;
+          onProgress?.call(p, status);
+        },
+      );
+
+      _isModelDownloaded = true;
+      _isDownloadingModel = false;
+      await initialize();
+      return true;
+    } catch (e) {
+      debugPrint('[WhistleVoice] Download failed: $e');
+      _errorMessage = 'Failed to download voice model: $e';
+      _isDownloadingModel = false;
+      return false;
+    }
+  }
+
   @override
   Future<bool> initialize() async {
     _errorMessage = null;
@@ -89,7 +143,15 @@ class WhistleVoiceCommandService implements VoiceCommandService {
         return false;
       }
 
-      // Initialize the Cactus speech-to-text engine
+      // Check if the voice model exists locally before attempting initialization
+      final modelExists = await checkModelDownloaded();
+      if (!modelExists) {
+        _errorMessage = 'Whistle voice model is not downloaded yet. Please download it in Settings.';
+        _isAvailable = false;
+        return false;
+      }
+
+      // Initialize the Cactus speech-to-text engine with existing local model
       await _stt.initializeModel(
         params: CactusInitParams(model: _modelName),
       );
