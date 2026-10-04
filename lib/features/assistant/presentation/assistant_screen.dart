@@ -43,6 +43,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
   }
 
   void _showSettingsSheet(AssistantController ctrl) {
+    ctrl.checkVoiceModelStatus();
     final outerContext = context;
     showModalBottomSheet<void>(
       context: context,
@@ -301,7 +302,13 @@ class _AssistantScreenState extends State<AssistantScreen> {
                                       ),
                                     ),
                                     const SizedBox(width: 8),
-                                    if (!ctrl.isVoiceModelDownloaded && !ctrl.isDownloadingVoiceModel)
+                                    if (ctrl.isDownloadingVoiceModel)
+                                      const SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.blueAccent),
+                                      )
+                                    else if (!ctrl.isVoiceModelDownloaded)
                                       ElevatedButton(
                                         onPressed: ctrl.downloadVoiceModel,
                                         style: ElevatedButton.styleFrom(
@@ -314,23 +321,37 @@ class _AssistantScreenState extends State<AssistantScreen> {
                                             borderRadius: BorderRadius.circular(6),
                                           ),
                                         ),
-                                        child: const Text('Download', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                        child: const Text('Download (30 MB)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                                       )
-                                    else if (ctrl.isWhistleEngineActive)
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                        decoration: BoxDecoration(
-                                          color: Colors.greenAccent.withValues(alpha: 0.2),
-                                          borderRadius: BorderRadius.circular(4),
-                                        ),
-                                        child: const Text(
-                                          'ACTIVE',
-                                          style: TextStyle(
-                                            color: Colors.greenAccent,
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.bold,
+                                    else
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          if (ctrl.isWhistleEngineActive)
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: Colors.greenAccent.withValues(alpha: 0.2),
+                                                borderRadius: BorderRadius.circular(4),
+                                              ),
+                                              child: const Text(
+                                                'ACTIVE',
+                                                style: TextStyle(
+                                                  color: Colors.greenAccent,
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                            ),
+                                          const SizedBox(width: 4),
+                                          IconButton(
+                                            icon: const Icon(Icons.refresh, size: 16, color: Colors.white38),
+                                            tooltip: 'Re-download model',
+                                            padding: EdgeInsets.zero,
+                                            constraints: const BoxConstraints(),
+                                            onPressed: ctrl.downloadVoiceModel,
                                           ),
-                                        ),
+                                        ],
                                       ),
                                   ],
                                 ),
@@ -685,6 +706,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
                     _buildModelStatusBadge(ctrl),
                     _buildModelDownloadArea(ctrl),
                     _buildSmartModelArea(ctrl),
+                    _buildVoiceModelArea(ctrl),
                     const SizedBox(height: 16),
 
                     // Jarvis-style reactive orb
@@ -960,20 +982,39 @@ class _AssistantScreenState extends State<AssistantScreen> {
   }
 
   Widget _buildMicButton(AssistantController ctrl) {
-    final enabled = !ctrl.isProcessing && ctrl.isSpeechAvailable;
+    final needsModelDownload =
+        ctrl.isWhistleEngineActive && !ctrl.isVoiceModelDownloaded;
+    final enabled = !ctrl.isProcessing && (ctrl.isSpeechAvailable || needsModelDownload);
     final listening = ctrl.isListening;
 
     return Tooltip(
-      message: listening ? 'Stop listening' : 'Give a command by voice',
+      message: listening
+          ? 'Stop listening'
+          : needsModelDownload
+              ? 'Download Whistle voice model (30 MB)'
+              : 'Give a command by voice',
       child: OutlinedButton(
-        onPressed: enabled ? () => ctrl.toggleListening() : null,
+        onPressed: enabled
+            ? () {
+                if (needsModelDownload && !ctrl.isSpeechAvailable) {
+                  ctrl.downloadVoiceModel();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Downloading Whistle voice model (30 MB)...'),
+                    ),
+                  );
+                  return;
+                }
+                ctrl.toggleListening();
+              }
+            : null,
         style: OutlinedButton.styleFrom(
           padding: const EdgeInsets.symmetric(vertical: 16),
           backgroundColor: listening ? Colors.redAccent : null,
           side: BorderSide(
             color: listening
                 ? Colors.redAccent
-                : ctrl.isSpeechAvailable
+                : (ctrl.isSpeechAvailable || needsModelDownload)
                     ? Colors.blueAccent
                     : Colors.white24,
           ),
@@ -1221,6 +1262,74 @@ class _AssistantScreenState extends State<AssistantScreen> {
           ),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         ),
+      ),
+    );
+  }
+
+  /// Shows Whistle on-device voice model download banner or progress on the main screen.
+  Widget _buildVoiceModelArea(AssistantController ctrl) {
+    if (!ctrl.isWhistleEngineActive) {
+      return const SizedBox.shrink();
+    }
+
+    if (ctrl.isDownloadingVoiceModel) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 10),
+        child: Column(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: ctrl.voiceModelDownloadProgress > 0
+                    ? ctrl.voiceModelDownloadProgress
+                    : null,
+                minHeight: 6,
+                backgroundColor: Colors.white12,
+                color: Colors.tealAccent,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Downloading Whistle Voice Model... ${(ctrl.voiceModelDownloadProgress * 100).round()}%',
+              style: const TextStyle(color: Colors.tealAccent, fontSize: 12),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (!ctrl.isVoiceModelDownloaded) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 10),
+        child: OutlinedButton.icon(
+          onPressed: ctrl.isProcessing ? null : () => ctrl.downloadVoiceModel(),
+          icon: const Icon(Icons.download, size: 18),
+          label: const Text('Download Whistle Voice Model (~30 MB)'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Colors.tealAccent,
+            disabledForegroundColor: Colors.white24,
+            side: const BorderSide(color: Colors.tealAccent),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          ),
+        ),
+      );
+    }
+
+    return const Padding(
+      padding: EdgeInsets.only(top: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.check_circle_outline, size: 12, color: Colors.tealAccent),
+          SizedBox(width: 4),
+          Text(
+            'Whistle Offline Voice Ready',
+            style: TextStyle(color: Colors.tealAccent, fontSize: 11),
+          ),
+        ],
       ),
     );
   }

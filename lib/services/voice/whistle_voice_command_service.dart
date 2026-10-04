@@ -82,8 +82,9 @@ class WhistleVoiceCommandService implements VoiceCommandService {
       final appDocDir = await getApplicationDocumentsDirectory();
       final modelFolder = Directory('${appDocDir.path}/models/$_modelName');
       if (await modelFolder.exists()) {
+        final vocabFile = File('${modelFolder.path}/vocab.json');
         final files = await modelFolder.list().toList();
-        _isModelDownloaded = files.isNotEmpty;
+        _isModelDownloaded = (await vocabFile.exists()) || files.length >= 10;
         return _isModelDownloaded;
       }
     } catch (_) {}
@@ -102,6 +103,15 @@ class WhistleVoiceCommandService implements VoiceCommandService {
 
     try {
       debugPrint('[WhistleVoice] Starting download for model $_modelName...');
+      try {
+        final appDocDir = await getApplicationDocumentsDirectory();
+        final modelFolder = Directory('${appDocDir.path}/models/$_modelName');
+        final vocabFile = File('${modelFolder.path}/vocab.json');
+        if (await modelFolder.exists() && !(await vocabFile.exists())) {
+          await modelFolder.delete(recursive: true);
+        }
+      } catch (_) {}
+
       await _stt.downloadModel(
         model: _modelName,
         downloadProcessCallback: (progress, status, isError) {
