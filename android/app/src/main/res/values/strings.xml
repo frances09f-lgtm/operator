@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_service_description">FRIDAY needs accessibility access to automate taps for your teachable commands (e.g. checking WhatsApp or Snapchat). It only runs when you trigger a saved command and all data stays on device.</string>
+</resources>
